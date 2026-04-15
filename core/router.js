@@ -1,9 +1,12 @@
 "use strict";
-import { html } from "./vdom.js";
+import { currentUri } from "../helper/helper.js";
+import { triggerRerender } from "./vdom.hooks.js";
+import { createVNode, html, pushJob, registerVdom } from "./vdom.js";
 
 class Router {
     routes = {};
     errors = {};
+    element = 'a';
     option = {
         prefix: "",
         default: null,
@@ -11,9 +14,14 @@ class Router {
         titleEl: null,
     };
 
+    prepare() {
+        this.use(triggerRerender)
+    }
+
     /**
      * @template {{
      *  prefix: String|null,
+     *  element: String|null
      *  default: Function|null,
      *  routes: Array<{
      *      uri: String,
@@ -24,7 +32,7 @@ class Router {
      *
      * @param {T} option
      */
-    static make = (option = {}) => {
+    static make(option = {}) {
         return new Router(option);
     };
 
@@ -33,7 +41,7 @@ class Router {
      * @param {String} hash
      * @returns
      */
-    scrollToHash = (hash) => {
+    scrollToHash(hash) {
         const el = document.querySelector(hash);
         if (!el) return;
         el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -44,6 +52,7 @@ class Router {
      * @template {{
      *  prefix: String|null,
      *  default: Function|null,
+     *  element: String|null
      *  routes: Array<{
      *      uri: String,
      *      title: String|null,
@@ -63,6 +72,44 @@ class Router {
                 });
             });
         }
+
+        if (option?.element) {
+            this.element = option.element
+        }
+
+
+        registerVdom('routerLink', (props = {}, ...children) => {
+            let destination = props?.to || ''
+            let scroll = props?.scrollTo || ''
+            let finalDestination = props.href = `${destination}${scroll}`
+
+            delete props.to
+            delete props.scrollTo
+
+            return createVNode(this.element, {
+                ...props, onclick: (e) => {
+                    e.preventDefault()
+                    let different = currentUri() !== destination;
+                    // console.log("hm");
+
+                    if (different) {
+                        // console.log("hm a");
+                        this.go(finalDestination);
+                    }
+                    // console.log(to.lastIndexOf('#'));
+                    if (scroll) {
+                        if (different) {
+                            pushJob(() => {
+                                // console.log("hm b");
+                                this.scrollToHash(scroll);
+                            })
+                        } else {
+                            this.scrollToHash(scroll);
+                        }
+                    }
+                }
+            }, children)
+        })
     }
 
     /**
@@ -71,7 +118,7 @@ class Router {
      * @param {() => Object} comp
      * @returns
      */
-    register = (uri, comp) => {
+    register(uri, comp) {
         if (this.option?.prefix) {
             uri = `${this.option?.prefix}${uri}`;
             // console.log(uri);
@@ -84,7 +131,7 @@ class Router {
      *
      * @param {String} uri
      */
-    go = (uri) => {
+    go(uri) {
         // if (uri !== location.pathname) {
         // console.log("called")
         history.pushState({ path: uri }, "", uri);
@@ -98,7 +145,7 @@ class Router {
      * @param {String} [path=location.pathname]
      * @returns {Object} Component
      */
-    routerView = (args = {}, path = location.pathname) => {
+    routerView(args = {}, path = location.pathname) {
         if (this.routes[path] || false) {
             return this._render(this.routes[path], args);
         }
@@ -136,7 +183,7 @@ class Router {
             return this.option.default();
         }
 
-        return html.p('404 Not Found');
+        // return html.p('404 Not Found');
     };
 
     _render(route, args) {
@@ -157,7 +204,7 @@ class Router {
      *
      * @param {Function} trigger Function to trigger reload
      */
-    use = (trigger) => {
+    use(trigger) {
         // console.log(trigger);
         this.trigger = trigger;
     };

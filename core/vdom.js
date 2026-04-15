@@ -3,6 +3,7 @@ import { allocate, orphan, overwrite, getCurrentHookNode } from "./vdom.hooks.js
 import { memorize, recall, remembered } from "./memory.js"
 
 let jobs = [];
+const memoryPrefix = "ComponentState_";
 const _keys = {};
 const getKey = (vnode) => vnode?.props?.key ?? null;
 const hasKey = (vnode) => vnode && typeof vnode.props?.key !== "undefined";
@@ -17,10 +18,9 @@ const pushJob = (fn) => {
 };
 
 const executeJobs = () => {
-    requestAnimationFrame(() => {
-        for (const job of jobs) job();
-        jobs.length = 0;
-    });
+    for (const job of jobs) requestAnimationFrame(job);
+
+    jobs.length = 0;
 };
 
 /**
@@ -34,10 +34,26 @@ const flattenChildren = (children) =>
         .filter((c) => c !== false && c !== null && c !== undefined);
 
 const createVNode = (tag, props = {}, ...children) => {
+    let flatten = flattenChildren(children);
+    let keyed = false;
+
+    for (let i = 0; i < flatten.length; i++) {
+        if (flatten[i]?.props?.key !== undefined) {
+            keyed = true;
+            break;
+        }
+    }
+
+    if (keyed) {
+        props.keyed = true;
+    }
+
+
     return {
         tag,
+        stringifiedProps: JSON.stringify(props),
         props,
-        children: flattenChildren(children).map((v) => wrapPrimitive(v)),
+        children: flatten.map(wrapPrimitive),
         isComp: false,
     };
 };
@@ -93,8 +109,7 @@ function cleanupVNode(node) {
         } catch (e) { }
     }
 
-    // Clean up refs - this is crucial!
-    const ref = node.props?.ref || node.ref;
+    const ref = node.props?.ref;
     if (ref && el?.isConnected === false) {
         updateRef(ref, null);
     }
@@ -114,6 +129,7 @@ const updateProps = (el, oldProps, newProps) => {
     for (const key in allProps) {
         const oldValue = oldProps[key];
         const newValue = newProps[key];
+        if (key === "keyed") continue;
 
         if (
             key === "useCleanup" &&
@@ -159,11 +175,7 @@ const updateProps = (el, oldProps, newProps) => {
                 if (typeof newValue === "string") {
                     el.style.cssText = newValue;
                 } else {
-                    for (const style in oldValue || {}) {
-                        if (!newValue || newValue[style] === undefined) {
-                            el.style[style] = "";
-                        }
-                    }
+                    el.style.cssText = "";
                     Object.assign(el.style, newValue);
                 }
             } else if (key.startsWith("on") && typeof newValue === "function") {
@@ -221,7 +233,7 @@ const renderVNode = (vnode, parentIsSvg = false) => {
 
     for (const [key, value] of Object.entries(work.props)) {
         if (key === "useCleanup" && typeof value === "function") continue;
-        if (key === "ref") continue; // Already handled
+        if (key === "ref" || key === "keyed") continue; // Already handled
         if (key === "key") setKey(value, work);
 
         if (key === "class") {
@@ -290,7 +302,11 @@ const patchChildrenWithKeys = (parent, oldChildren, newChildren) => {
 
         const oldVNode = oldKeyMap.get(key);
         if (oldVNode) {
-            updateProps(oldVNode.el, oldVNode.props, newVNode.props);
+            if (oldVNode.stringifiedProps != newVNode.stringifiedProps) {
+                requestAnimationFrame(() => {
+                    updateProps(oldVNode.el, oldVNode.props, newVNode.props);
+                })
+            }
 
             const oldChildren = oldVNode.children || [];
             const newChildren = newVNode.children || [];
@@ -321,7 +337,6 @@ const patchChildrenWithKeys = (parent, oldChildren, newChildren) => {
     updatedChildren.forEach((vnode, i) => {
         const current = parent.children[i];
         if (vnode.el !== current) {
-            isComp
             parent.insertBefore(vnode.el, current);
         }
     });
@@ -342,8 +357,8 @@ const handleComponentState = (old, replacement) => {
     let current = getCurrentHookNode();
     let store = new Array(oldHookCount);
     let storedMemory = [];
-    if (replacement.remember && remembered(replacement.stringified)) {
-        storedMemory = recall(replacement.stringified);
+    if (replacement.remember && remembered(memoryPrefix + replacement.stringified)) {
+        storedMemory = recall(memoryPrefix + replacement.stringified);
     }
 
     for (let i = 0; i < Math.max(oldHookCount, replacementHookCount); i++) {
@@ -355,6 +370,14 @@ const handleComponentState = (old, replacement) => {
             }
         }
 
+        // if (current.value?.cleanup) {
+        //     try {
+        //         current.value.cleanup()
+        //     } catch (error) {
+
+        //     }
+        // }
+
         current.value = undefined
 
         if (replacement.remember) {
@@ -363,7 +386,7 @@ const handleComponentState = (old, replacement) => {
                 current.value.recompute = true;
             }
         }
-        
+
 
         current = current.next
     }
@@ -372,7 +395,7 @@ const handleComponentState = (old, replacement) => {
         orphan(old.compHooks - replacement.compHooks)
     }
 
-    memorize(old.stringified, store, old.invalidAfter)
+    memorize(memoryPrefix + old.stringified, store, old.invalidAfter)
 }
 
 /**
@@ -395,7 +418,7 @@ const handleComponentRetrieval = (component) => {
     orphan(component.compHooks - 1)
 
     if (component.remember) {
-        memorize(component.stringified, data, component.invalidAfter)
+        memorize(memoryPrefix + component.stringified, data, component.invalidAfter)
     }
 }
 
@@ -406,8 +429,8 @@ const handleComponentRetrieval = (component) => {
  */
 const handleComponentApplyState = (component) => {
     allocate(component.compHooks - 1);
-    if (component.remember && remembered(component.stringified)) {
-        overwrite(recall(component.stringified), component.recompute)
+    if (component.remember && remembered(memoryPrefix + component.stringified)) {
+        overwrite(recall(memoryPrefix + component.stringified), component.recompute)
     }
 }
 
@@ -513,7 +536,15 @@ const patch = (parent, oldNode, newNode, skip = false) => {
         return newNode;
     }
 
-    if (oldNode?.tag === "#fragment" && newNode.tag !== "#fragment") {
+    if (oldNode == null) {
+        const el = renderVNode(newNode);
+        parent.appendChild(el);
+        newNode.el = el;
+        return newNode;
+    }
+
+    // console.log("got here", oldNode, newNode);
+    if (oldNode.tag === "#fragment" && newNode.tag !== "#fragment") {
         let node = oldNode.el;
         const end = oldNode._end;
 
@@ -533,12 +564,6 @@ const patch = (parent, oldNode, newNode, skip = false) => {
         return newNode;
     }
 
-    if (oldNode == null) {
-        const el = renderVNode(newNode);
-        parent.appendChild(el);
-        newNode.el = el;
-        return newNode;
-    }
 
     if (oldNode?.tag !== newNode?.tag) {
         cleanupVNode(oldNode);
@@ -564,12 +589,15 @@ const patch = (parent, oldNode, newNode, skip = false) => {
         return newNode;
     }
 
-    updateProps(oldNode.el, oldNode.props || {}, newNode.props || {});
+    if (oldNode.stringifiedProps !== newNode.stringifiedProps) {
+        requestAnimationFrame(() => {
+            updateProps(oldNode.el, oldNode.props || {}, newNode.props || {});
+        });
+    }
 
     if (
         newNode.tag === "input" &&
-        newNode.props?.value !== undefined &&
-        oldNode.el.value !== newNode.props.value
+        oldNode.el?.value !== newNode.props?.value
     ) {
         oldNode.el.value = newNode.props.value;
     }
@@ -577,18 +605,20 @@ const patch = (parent, oldNode, newNode, skip = false) => {
     const oldChildren = oldNode.children || [];
     const newChildren = newNode.children || [];
     if (
-        oldChildren.some((node) => hasKey(node)) &&
-        newChildren.some((node) => hasKey(node))
+        oldNode.props?.keyed &&
+        newNode.props?.keyed
     ) {
         patchChildrenWithKeys(oldNode.el, oldChildren, newChildren);
     } else {
         const max = Math.max(oldChildren.length, newChildren.length);
         for (let i = 0; i < max; i++) {
-            patch(
-                oldNode?.tag === "#fragment" ? parent : oldNode.el,
-                oldChildren[i],
-                newChildren[i]
-            );
+            requestAnimationFrame(() => {
+                patch(
+                    oldNode?.tag === "#fragment" ? parent : oldNode.el,
+                    oldChildren[i],
+                    newChildren[i]
+                );
+            })
         }
     }
 
@@ -638,9 +668,15 @@ const getTarget = (t, scope = document) => {
 
 let customVdom = {};
 
-const registerCustomVdom = (tag, resolver) => {
+const registerVdom = (tag, resolver) => {
     customVdom[tag] = resolver;
 };
+/**
+ * More direct way to create vnode
+ */
+function vnode(tag, props, ...children) {
+    return createVNode(tag, props, [props?.children, ...children])
+}
 
 /**
  * DSL-VDOM factory proxy.
@@ -725,7 +761,7 @@ const html = new Proxy(
                  */
                 $: (...children) => ({
                     tag: "#fragment",
-                    children: flattenChildren(children),
+                    children: flattenChildren(children).map(wrapPrimitive),
                 }),
 
                 ...customVdom,
@@ -749,9 +785,12 @@ const html = new Proxy(
                  * @returns {object} VNode
                  */
                 ((props = {}, ...children) => {
-                    if (typeof props === "string") {
+                    let propType = typeof props;
+                    if (propType === "string" || propType === "number") {
                         return createVNode(tag, {}, [props]);
                     } else if (Array.isArray(props)) {
+                        return createVNode(tag, {}, props);
+                    } else if (children.length == 0 && props?.tag) {
                         return createVNode(tag, {}, props);
                     } else {
                         return createVNode(tag, props, children);
@@ -765,6 +804,7 @@ const html = new Proxy(
 
 export {
     html,
+    vnode,
     getTarget,
     getKey,
     updateProps,
@@ -773,7 +813,7 @@ export {
     cleanupVNode,
     RenderVDOM,
     patch,
-    registerCustomVdom,
+    registerVdom,
     pushJob,
     executeJobs,
 };

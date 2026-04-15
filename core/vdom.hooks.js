@@ -1,4 +1,5 @@
 "use strict";
+import { memorize, recall, remembered } from "./memory.js";
 import { getHooks, setHooks } from "./state.js";
 import { RenderVDOM, executeJobs, getTarget } from "./vdom.js";
 
@@ -8,6 +9,15 @@ let currentComponent = null,
     handler = null,
     disableRerender = false,
     renderDebounce = null;
+
+/**
+ * 
+ * @param {Object} hookNode 
+ * @returns {Object}
+ */
+const nextNode = (hookNode) => {
+    return hookNode.next = hookNode.next || { next: null }
+}
 
 const resetContext = () => {
     currentComponent.hookNode = currentComponent.hooks;
@@ -20,7 +30,6 @@ const triggerRerender = () => {
 const setRegression = (bool) => (regression = bool);
 
 const resetPreview = () => {
-    previewNode = null
     previewNode = { next: null };
 };
 
@@ -193,6 +202,35 @@ const comp = (
             counter++;
         }
         name = JSON.stringify(vdom);
+    } else if (options.name) {
+        const stringifiedOption = JSON.stringify(options);
+
+        if (!remembered('compHookCount_' + stringifiedOption)) {
+
+            const previewHook = previewNode;
+
+            regression = true;
+
+            const vdom = compFn(args);
+
+            result.vnode = vdom;
+
+            regression = false;
+
+            const nextExpectedNode = previewNode;
+            let current = previewHook;
+
+            while (current && current !== nextExpectedNode) {
+                current = current.next;
+                counter++;
+            }
+            memorize('compHookCount_' + stringifiedOption, counter, 0)
+
+            name = options.name
+        } else {
+            name = options.name
+            counter = recall('compHookCount_' + stringifiedOption)
+        }
     } else {
         counter = options.hook;
         name = options.name;
@@ -228,10 +266,10 @@ const destroy = () => {
  * @returns {[T, (val: T | ((prev: T) => T)) => void]} A tuple: current state and a setter function.
  */
 const useState = (initial) => {
-    let hookNode = regression ? previewNode : currentComponent.hookNode;
+    let hookNode = regression ? previewNode : currentComponent?.hookNode;
 
     if (regression) {
-        previewNode = hookNode.next = hookNode.next || { next: null };
+        previewNode = nextNode(hookNode);
         return [initial, () => { }];
     }
 
@@ -247,7 +285,7 @@ const useState = (initial) => {
         }
     };
 
-    currentComponent.hookNode = hookNode.next = hookNode.next || { next: null };
+    currentComponent.hookNode = nextNode(hookNode);
 
     return [hookNode?.value, set];
 };
@@ -268,7 +306,7 @@ const useRef = (initial) => {
     let hookNode = regression ? previewNode : currentComponent.hookNode;
 
     if (regression) {
-        previewNode = hookNode.next = hookNode.next || { next: null };
+        previewNode = nextNode(hookNode);
         return { current: undefined };
     }
 
@@ -276,7 +314,7 @@ const useRef = (initial) => {
         hookNode.value = { current: initial };
     }
 
-    currentComponent.hookNode = hookNode.next = hookNode.next || { next: null };
+    currentComponent.hookNode = nextNode(hookNode);
     return hookNode?.value;
 };
 /**
@@ -289,7 +327,7 @@ const useEffect = (effect, deps = null) => {
     let hookNode = regression ? previewNode : currentComponent.hookNode;
 
     if (regression) {
-        previewNode = hookNode.next = hookNode.next || { next: null };
+        previewNode = nextNode(hookNode);
         return;
     }
 
@@ -302,7 +340,7 @@ const useEffect = (effect, deps = null) => {
             : true;
 
     if (hasNoDeps || hasChangedDeps) {
-        if (oldHook?.cleanup) {
+        if (oldHook?.cleanup) { //&& !oldHook?.recompute) {
             queueMicrotask(() => {
                 oldHook.cleanup?.();
             });
@@ -316,7 +354,7 @@ const useEffect = (effect, deps = null) => {
         hookNode.value = oldHook;
     }
 
-    currentComponent.hookNode = hookNode.next = hookNode.next || { next: null };
+    currentComponent.hookNode = nextNode(hookNode);
 };
 
 /**
@@ -331,7 +369,7 @@ const useMemo = (compute, deps) => {
     let hookNode = regression ? previewNode : currentComponent.hookNode;
 
     if (regression) {
-        previewNode = hookNode.next = hookNode.next || { next: null };
+        previewNode = nextNode(hookNode);
         return undefined;
     }
 
@@ -351,7 +389,7 @@ const useMemo = (compute, deps) => {
         return value;
     }
 
-    currentComponent.hookNode = hookNode.next = hookNode.next || { next: null };
+    currentComponent.hookNode = nextNode(hookNode);
     return prev.value;
 };
 
@@ -364,35 +402,77 @@ function onReady(cb, delay = 1000) {
         setTimeout(cb, delay);
     }
 }
+/**
+ * Just wrapper for establishing connection to the ws server
+ * @param {Object} config 
+ * @param {Object} app 
+ */
+function hmr(config, app) {
+    const wsPort = config?.ws?.port || 4040,
+        wsHost = config?.ws?.host || location.hostname,
+        main = config?.main || './src/app.js'
+
+    const socket = new WebSocket(`ws://${wsHost}:${wsPort}`);
+    socket.addEventListener('message', async ({ data }) => {
+        const msg = JSON.parse(data);
+        if (msg.type === 'reload') {
+            try {
+                console.log(`[HMR]: ${msg.path}`);
+                // window.setLoad(msg.path);
+                const mod = await import(`${main}?t=` + msg.timestamp);
+                if (mod.default) {
+                    app.setRenderFn(mod.default)
+                    app.rerender();
+                }
+            } catch (error) {
+                console.log(error);
+            }
+        }
+    });
+}
 
 /**
  *
- * @param {Function} fn
- * @param {String} target
- * @param {String} id
+ * @param {Element|Document|DocumentFragment|String} root
  * @returns
  */
-function createRoot(fn, target, id = "default") {
+function createRoot(root) {
     const comp = {
-        use: (any, callback) => {
-            callback(any);
+        /**
+         * @param {Function} app 
+         * @returns Object
+         */
+        render(app) {
+            comp.renderFn = app
+            currentComponent = comp;
+            handler = comp.rerender;
+            comp.rerender();
             return comp;
         },
-        hooks: { next: null, ...getHooks(id) },
+        /**
+         * 
+         * @param {Object} any 
+         * @returns Object
+         */
+        use(any) {
+            any.prepare()
+            return comp;
+        },
+        hooks: { next: null },
         hookNode: null,
         vdom: null,
-        target: getTarget(target),
-        renderFn: fn,
-        setRenderFn: (fn) => (comp.renderFn = fn),
-        rerender: () => {
-            if (renderDebounce) {
+        target: getTarget(root),
+        renderFn: null,
+        setRenderFn(fn) {
+            comp.renderFn = fn;
+        },
+        rerender: () => requestAnimationFrame(() => {
+            if (typeof renderDebounce == 'number') {
                 clearTimeout(renderDebounce)
                 renderDebounce = null
             }
             renderDebounce = setTimeout(() => {
                 try {
-                    handler = comp.rerender;
-                    currentComponent = comp;
                     resetContext();
                     resetPreview();
                     const newVNode = comp.renderFn();
@@ -401,7 +481,7 @@ function createRoot(fn, target, id = "default") {
                     } else {
                         comp.vdom = RenderVDOM.update(comp.target, comp.vdom, newVNode);
                     }
-                    setHooks(id, comp.hooks);
+
                 } catch (error) {
                     comp.target.innerHTML = `<pre>${error.stack}</pre>`;
                     console.error(error);
@@ -410,9 +490,8 @@ function createRoot(fn, target, id = "default") {
             }, 5);
 
             onReady(executeJobs, 300);
-        },
+        }),
     };
-    comp.rerender();
     return comp;
 }
 
@@ -434,4 +513,5 @@ export {
     triggerRerender,
     getData,
     bulkSetState,
+    hmr
 };
