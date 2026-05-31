@@ -615,7 +615,7 @@ const patch = (parent, oldNode, newNode, skip = false) => {
         return newNode;
     }
 
-    if (oldNode.tag === "#fragment" && newNode.tag !== "#fragment") {
+    if (oldNode.tag === "#fragment") {
         let node = oldNode.el;
         const end = oldNode._end;
 
@@ -631,7 +631,7 @@ const patch = (parent, oldNode, newNode, skip = false) => {
 
         const newEl = renderVNode(newNode);
         parent.replaceChild(newEl, oldNode._end);
-        newNode.el = newEl;
+        if(newNode.tag != '#fragment') newNode.el = newEl;
         return newNode;
     }
 

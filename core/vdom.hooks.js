@@ -3,7 +3,6 @@ import { value } from "../helper/helper.js";
 import { RenderVDOM, executeJobs, getTarget } from "./vdom.js";
 
 let currentComponent = null,
-    regression = false,
     handler = null,
     disableRerender = false,
     renderDebounce = null;
@@ -25,8 +24,6 @@ const triggerRerender = () => {
     if (handler) handler();
 };
 
-const setRegression = (bool) => (regression = bool);
-
 const trailMaker = (n = 1) => {
     let head = { next: null };
     let node = head;
@@ -42,8 +39,6 @@ const trailMaker = (n = 1) => {
  * @param {number} [n=1] - Number of subsequent hook states to forget
  */
 const resets = (n = 1) => {
-    if (regression) return;
-
     if (!currentComponent) return;
 
     let hookNode = currentComponent.hookNode;
@@ -118,12 +113,16 @@ const getCurrentHookNode = () => {
 };
 
 /**
- * 
- * @param {string|VNodeFunction} stringFn 
+ *
+ * @param {string|VNodeFunction} stringFn
  * @returns {number}
  */
 function countHooks(stringFn) {
-    return (stringFn.match(/(?<!\/\/[^\n]*)(useEffect\(|useState\(|useRef\(|useMemo\()/gm) || []).length;
+    return (
+        stringFn.match(
+            /(?<!\/\/[^\n]*)(useEffect\(|useState\(|useRef\(|useMemo\()/gm,
+        ) || []
+    ).length;
 }
 
 /**
@@ -169,8 +168,8 @@ const comp = (
             compHooks: null,
         };
 
-    counter = value(options?.hook, countHooks(compFn.toString()))
-    name = value(options?.name, comp.toString() + JSON.stringify(options))
+    counter = value(options?.hook, countHooks(compFn.toString()));
+    name = value(options?.name, comp.toString() + JSON.stringify(options));
 
     result.stringified = name;
     result.compHooks = counter;
@@ -216,7 +215,7 @@ const useState = (initial, handleInputEvent = false) => {
         }
         hookNode.value = typeof val == "function" ? val(hookNode?.value) : val;
 
-        if (!regression && !disableRerender) {
+        if (!disableRerender) {
             currentComponent.rerender();
         }
     };
@@ -227,15 +226,11 @@ const useState = (initial, handleInputEvent = false) => {
 };
 
 const bulkSetState = (callback) => {
-    if (regression) return;
-
     disableRerender = true;
     callback();
     disableRerender = false;
 
-    if (!regression) {
-        currentComponent.rerender();
-    }
+    currentComponent.rerender();
 };
 
 const useRef = (initial) => {
@@ -330,28 +325,30 @@ function onReady(cb, delay = 1000) {
  * @param {Object} config
  * @param {Object} app
  */
-function hmr(config, app) {
-    const wsPort = config?.ws?.port || 4040,
-        wsHost = config?.ws?.host || location.hostname,
-        main = config?.main || "./src/app.js";
+function hmr(config, app, enabled = false) {
+    if (enabled) {
+        const wsPort = config?.ws?.port || 4040,
+            wsHost = config?.ws?.host || location.hostname,
+            main = config?.main || "./src/app.js";
 
-    const socket = new WebSocket(`ws://${wsHost}:${wsPort}`);
-    socket.addEventListener("message", async ({ data }) => {
-        const msg = JSON.parse(data);
-        if (msg.type === "reload") {
-            try {
-                console.log(`[HMR]: ${msg.path}`);
-                // window.setLoad(msg.path);
-                const mod = await import(`${main}?t=` + msg.timestamp);
-                if (mod.default) {
-                    app.setRenderFn(mod.default);
-                    app.rerender();
+        const socket = new WebSocket(`ws://${wsHost}:${wsPort}`);
+        socket.addEventListener("message", async ({ data }) => {
+            const msg = JSON.parse(data);
+            if (msg.type === "reload") {
+                try {
+                    console.log(`[HMR]: ${msg.path}`);
+                    // window.setLoad(msg.path);
+                    const mod = await import(`${main}?t=` + msg.timestamp);
+                    if (mod.default) {
+                        app.setRenderFn(mod.default);
+                        app.rerender();
+                    }
+                } catch (error) {
+                    console.log(error);
                 }
-            } catch (error) {
-                console.log(error);
             }
-        }
-    });
+        });
+    }
 }
 
 /**
@@ -438,7 +435,6 @@ export {
     allocate,
     orphan,
     overwrite,
-    setRegression,
     triggerRerender,
     getData,
     bulkSetState,

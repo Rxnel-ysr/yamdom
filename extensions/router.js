@@ -182,12 +182,13 @@ class Router {
 
     /**
      * @param {string} hash
+     * @param {string} block
      * @returns {void}
      */
-    scrollToHash(hash) {
+    scrollToHash(hash, block = 'start') {
         const el = document.querySelector(hash);
         if (!el) return;
-        el.scrollIntoView({ behavior: "smooth", block: "start" });
+        el.scrollIntoView({ behavior: "smooth", block: block });
         history.replaceState(null, "", hash);
     };
 
@@ -210,6 +211,7 @@ class Router {
         registerVdom('routerLink', (props = {}, ...children) => {
             let destination = props?.to || ''
             let scroll = props?.scrollTo || ''
+            let block = props?.block || 'start'
             let finalDestination = props.href = `${destination}${scroll}`
 
             delete props.to
@@ -226,10 +228,10 @@ class Router {
                     if (scroll) {
                         if (different) {
                             pushJob(() => {
-                                this.scrollToHash(scroll);
+                                this.scrollToHash(scroll, block);
                             })
                         } else {
-                            this.scrollToHash(scroll);
+                            this.scrollToHash(scroll, block);
                         }
                     }
                 }
