@@ -403,7 +403,7 @@ const handleComponentState = (old, replacement) => {
 
     for (let i = 0; i < Math.max(oldHookCount, replacementHookCount); i++) {
         if (i > oldHookCount) {
-            current = { next: current.next };
+            current = { next: current?.next };
         } else {
             if (old.remember) {
                 store[i] = current.value;
@@ -529,7 +529,7 @@ const handleComponent = (parent, old, newOne) => {
  * @param {boolean} skip
  * @returns {VNode | null}
  */
-const patch = (parent, oldNode, newNode, skip = false) => {
+const patch = (parent, oldNode, newNode, skip = false, type = 0) => {
     if (oldNode == null && newNode == null) return null;
 
     if (!skip && (isVNodeComponent(oldNode) || isVNodeComponent(newNode))) {
@@ -610,12 +610,13 @@ const patch = (parent, oldNode, newNode, skip = false) => {
         }
 
         const el = renderVNode(newNode);
-        parent.appendChild(el);
+        if (type === 1) parent.before(el);
+        else parent.appendChild(el);
         newNode.el = el;
         return newNode;
     }
 
-    if (oldNode.tag === "#fragment") {
+    if (oldNode.tag === "#fragment" && newNode.tag !== '#fragment') {
         let node = oldNode.el;
         const end = oldNode._end;
 
@@ -631,7 +632,24 @@ const patch = (parent, oldNode, newNode, skip = false) => {
 
         const newEl = renderVNode(newNode);
         parent.replaceChild(newEl, oldNode._end);
-        if(newNode.tag != '#fragment') newNode.el = newEl;
+        return newNode;
+    }
+
+    if (oldNode.tag == '#fragment' && newNode.tag == '#fragment') {
+        const max = Math.max(oldNode.children.length, newNode.children.length);
+        for (let i = 0; i < max; i++) {
+            requestAnimationFrame(() => {
+                patch(
+                    newNode.children[i] ? oldNode._end : parent,
+                    oldNode.children[i],
+                    newNode.children[i],
+                    skip,
+                    1
+                );
+            });
+        }
+        newNode.el = oldNode.el
+        newNode._end = oldNode._end
         return newNode;
     }
 
