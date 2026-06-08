@@ -19,7 +19,8 @@ const mimeTypes = {
     '.gif': 'image/gif',
     '.ico': 'image/x-icon',
     '.webp': 'image/webp',
-    '.svg': 'image/svg+xml'
+    '.svg': 'image/svg+xml',
+    '.wasm': 'application/wasm'
 };
 
 const binary = [
@@ -28,7 +29,8 @@ const binary = [
     '.webp',
     '.mp3',
     '.mp4',
-    '.svg'
+    '.svg',
+    '.wasm'
 ]
 
 const coreFiles = [

@@ -624,12 +624,15 @@ const patch = (parent, oldNode, newNode, skip = false, type = -1) => {
 
         while (node && node !== end) {
             const next = node.nextSibling;
-            parent.removeChild(node);
+            if (type > -1) parent[0].removeChild(node);
+            else parent.removeChild(node)
             node = next;
         }
 
         const newEl = renderVNode(newNode);
-        parent.replaceChild(newEl, oldNode._end);
+        if (type > -1) parent[0].removeChild(node);
+        else parent.replaceChild(newEl, oldNode._end)
+
         return newNode;
     }
 
@@ -645,7 +648,8 @@ const patch = (parent, oldNode, newNode, skip = false, type = -1) => {
 
         if (newNode.tag === "#fragment") {
             const frag = renderVNode(newNode);
-            parent.replaceChild(frag, oldNode.el);
+            if (type > -1) parent[0].replaceChild(frag, oldNode.el);
+            else   parent.replaceChild(frag, oldNode.el);
             return newNode;
         }
 
