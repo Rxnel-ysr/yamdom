@@ -547,7 +547,7 @@ class Router {
             result = this._render(matchedRoute, {
                 ...args,
                 ...params,
-            });
+            }, path);
             this.cache.memorize(
                 path,
                 { rendered: result, params, route: matchedRoute },
@@ -566,9 +566,10 @@ class Router {
     /**
      * @param {RouteComponent} route
      * @param {object} args
+     * @param {string} path 
      * @returns {VNode | VNodeComponent | null}
      */
-    _render(route, args) {
+    _render(route, args, path) {
         if (this.option?.titleId && route?.title) {
             this.option.titleEl ??= document.getElementById(this.option.titleId);
             if (this.option.titleEl !== null) {
@@ -577,15 +578,22 @@ class Router {
         }
 
         let component = route.component;
+        let setting = route.setting;
 
         if (route.static && route?.rendered) {
             return route.rendered;
         }
 
+        if (setting?.cached) {
+            setting = { ...setting };
+            if (setting?.name) setting.name += path;
+            else throw new Error("`name` setting must be provided if cached enabled.");
+        }
+
         try {
             if (isLazyComponent(component)) {
                 if (component.importedFn) {
-                    return comp(component.importedFn, args, route.setting);
+                    return comp(component.importedFn, args, setting);
                 }
                 this._scheduleFetchComponent(this.cachePath, route, args);
                 if (this.placeholder) {
@@ -597,7 +605,7 @@ class Router {
                 }
                 return null;
             } else {
-                return comp(component, args, route.setting);
+                return comp(component, args, setting);
             }
         } catch (e) {
             return html.p(`Render error: ${e}`);

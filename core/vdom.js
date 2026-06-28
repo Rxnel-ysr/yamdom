@@ -457,7 +457,6 @@ const handleComponentState = (old, replacement) => {
     }
 
     if (old.remember) {
-        console.log(store)
         memory.memorize(memoryPrefix + old.stringified, store, old.invalidAfter);
     }
 };

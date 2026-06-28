@@ -6,10 +6,20 @@
  */
 
 /**
+ * @typedef {Object} VNodeRouteComponentSetting
+ * @property {string} [name]
+ * @property {number} [hook]
+ * @property {boolean} [recompute]
+ * @property {number} [invalidAfter]
+ * @property {boolean} [remember]
+ * @property {boolean} [cached]
+ */
+
+/**
  * @typedef {Object} RouteComponent
  * @property {LazyComponent | VNodeFunction} component
  * @property {string} [title]
- * @property {VNodeComponentSetting | null} [setting]
+ * @property {VNodeRouteComponentSetting | null} [setting]
  * @property {boolean} [static]
  * @property {VNode | null} [rendered]
  * @property {number} [cacheExp]
@@ -19,7 +29,7 @@
  * @typedef {Object} Route
  * @property {string} uri
  * @property {LazyComponent | VNodeFunction} component
- * @property {VNodeComponentSetting | null} [cache]
+ * @property {VNodeRouteComponentSetting | null} [cache]
  * @property {string} [title]
  * @property {VNode | null} [rendered]
  * @property {number} [cacheExp]
